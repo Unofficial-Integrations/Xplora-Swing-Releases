@@ -1,0 +1,88 @@
+name: Build and Release (Windows ARM64)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+  workflow_dispatch:
+
+env:
+  PLATFORM: windows-arm64
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-11-arm
+
+    steps:
+      # Set up Java
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          java-package: jdk+jmods # jmods is required by jlink
+
+      # Checkout Xplora Core
+      - name: Checkout Xplora Core Repository
+        uses: actions/checkout@v7
+        with:
+          repository: Unofficial-Integrations/Xplora-Core
+          token: ${{ secrets.XPLORA_BUILD_TOKEN }}
+          path: xplora-core
+
+      # Install Xplora Core
+      - name: Install Xplora Core Artifact
+        working-directory: xplora-core
+        run: mvn -B install -DskipTests
+
+      # Checkout Xplora Swing
+      - name: Checkout Xplora Swing Repository
+        uses: actions/checkout@v7
+        with:
+          repository: Unofficial-Integrations/Xplora-Desktop-Swing
+          token: ${{ secrets.XPLORA_BUILD_TOKEN }}
+          path: xplora-swing
+
+      # Build Xplora Swing
+      - name: Build Xplora Swing
+        working-directory: xplora-swing
+        run: mvn -B -Pdist package jpackage:jpackage@win
+
+      # Pack Xplora Swing
+      - name: Pack Xplora Swing
+        shell: pwsh
+        working-directory: xplora-swing
+        run: |
+          Compress-Archive `
+            -Path target\release\Xplora\* `
+            -DestinationPath Xplora-${{ github.ref_name }}-${{ env.PLATFORM }}.zip
+
+      # Upload Xplora Swing
+      - name: Upload Packaged Xplora Swing
+        uses: actions/upload-artifact@v7
+        with:
+          name: Xplora--${{ env.PLATFORM }}
+          path: xplora-swing/Xplora-${{ github.ref_name }}-${{ env.PLATFORM }}.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: Xplora--${{ env.PLATFORM }}
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/Xplora-${{ github.ref_name }}-${{ env.PLATFORM }}.zip
